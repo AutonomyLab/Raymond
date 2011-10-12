@@ -1,0 +1,8 @@
+Add files or repository
+git add ./[file's name]
+
+Commit
+git commit -a -m '[message]'
+
+Push
+git push -u origin master

@@ -1,0 +1,43 @@
+
+For each new terminal you open:
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:~/Documents/robot/bin/lib/ 
+
+To open a world:
+cd ./Documents/robot/Stage/      
+../bin/bin/stage ../bin/share/stage/worlds/simplemodified.world
+
+
+To compile:
+/Documents/robot/Stage/    do make, make install
+or bash my.bash
+
+Modify World:
+lsaint/Documents/robot/bin/share/stage/worlds
+
+Modify controller:
+lsaint/Documents/robot/Stage/examples/ctrl
+when you create a new file.cc file, you need to add the name of the file to lsaint/Documents/robot/Stage/examples/ctrl/CMakeLists.txt
+
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Step 1 cd /Stage       cmake . 
+Step 2 modify CMakeCache.txt
+change
+CMAKE_INSTALL_PREFIX:PATH=/usr/local/
+to
+makeCMAKE_INSTALL_PREFIX:PATH=/home/lsaint/Documents/robot/bin/
+Step 3 cd /Stage             make
+Step 4 make install 
+
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+No!!!!!
+ error while loading shared libraries: libstage.so.4.0.0: cannot open shared object file: No such file or directory
+
+YES!!!!
+
+Stage 4.0.0 
+
+[Stage: done]
+

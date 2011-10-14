@@ -10,7 +10,7 @@ const double coef_forgetting = 0.98;
 const double scan_angle = PI/4; //scan from "scan_angle" to -"scan_angle"
 const double fix_scan_angle = 2*PI/3;
 const double maximal_wheel_speed = 2.6;// rot_wheel_speed * wheel_radius in [m/s]
-const double robot_radius = 0.29;//[m]
+const double robot_radius = 0.20;//[m]
 const double sensor_precision = 0.005;
 
 const double cruisespeed = 0.4; 
@@ -47,7 +47,7 @@ typedef struct
   vector_t past_pose; 
 } scan_t;
 
-bool Static_scan(double angle_start, double angle_end, double rot_speed, scan_t scan, robot_t* robot, Pose pose, double distance);
+bool Static_scan(double angle_start, double scan_fov, double rot_speed, scan_t* scan, robot_t* robot, Pose pose, double distance);
 int LaserUpdate( Model* mod, robot_t* robot );
 int PositionUpdate( Model* mod, robot_t* robot );
 double Absolute(double a);// return absolute value of "a" = ||a||                 _________
@@ -101,6 +101,7 @@ int LaserUpdate( Model* mod, robot_t* robot )
     distance=Simple_normal_deviate(0, sensor_precision)+new_scan[1];
   else
     distance=new_scan[1];
+  
   //bool obstruction = false;
   //bool stop = false;
   // find the closest distance to the left and right and check if
@@ -108,23 +109,24 @@ int LaserUpdate( Model* mod, robot_t* robot )
   //double minleft = 1e6;
   //double minright = 1e6;
   double distance_traveled=0;
-  double speedX,speedY,orientation;
-  double tmp_orientation;
+  //double speedX,speedY,orientation;
+  //double tmp_orientation;
 
-  static bool rotate_clockwise = true;
+  //static bool rotate_clockwise = true;
   static bool scan_finished = false;
-  static double pos_start;
-  static int i=0;
+  //static double pos_start;
+  //static int i=0;
   static scan_t scan;
-  static vector_t vector_avoidance, speed_avoidance;
+  //static vector_t vector_avoidance, speed_avoidance;
   Pose pose = robot->pos->GetPose();
-  static Pose past_pose;
+ // static Pose past_pose;
 
+  
   if(scan_finished==false)
-    scan_finished = Static_scan(0, 2*PI, 2, scan, robot, pose, distance);
+    scan_finished = Static_scan(-PI/2.0+robot->goal_orientation, PI, 2, & scan, robot, pose, distance);
   else
   {
-    Motor_control(robot, 1,2,pose.a);
+    Motor_control(robot, 1,0,pose.a);
     
     /*if((stepcount%2) == 1)
     {
@@ -178,22 +180,19 @@ int LaserUpdate( Model* mod, robot_t* robot )
       printf("Coef: %.3f Vector[%.3f %.3f] Speed_avoidance [%.3f %.3f] Speed [%.2f %.2f] \n",coef_avoidance,vector_avoidance.x, vector_avoidance.y,speed_avoidance.x, speed_avoidance.y, speedX,speedY);
     }
     stepcount++*/;
-    distance_traveled=(pose.x-past_pose.x)*(pose.x-past_pose.x)+(pose.y-past_pose.y)*(pose.y-past_pose.y);
-    if ( distance_traveled>(scan.max[1]-1)*(scan.max[1]-1) )
+    
+    distance_traveled=Norm_vector(pose.x-scan.past_pose.x, pose.y-scan.past_pose.y);
+    printf("Go straight until %.1f m. Distance travelled: %.2f m\n",scan.max[1], distance_traveled);
+ 
+    if(scan.max[1] > 6)
+      scan.max[1]=6;
+    if ( distance_traveled> scan.max[1]-1 )
     {
-      double diff_orientation;
-      diff_orientation=normalize(pose.a-robot->goal_orientation);
-      if( Absolute(diff_orientation) >0.01) // go to the original orientation
-      {
-	robot->pos->SetSpeed( 0,0,-diff_orientation*5 );	//P controller
-      }
-      else
-      {
-	scan_finished=false;
-	robot->pos->SetSpeed( 0,0,0 );
-      }
-    }	
-  }	
+      scan_finished=false;
+      robot->pos->SetSpeed( 0,0,0 );
+    }
+  }
+  
   /*
   for (uint32_t i = 0; i < sample_count; i++)
   {
@@ -269,106 +268,129 @@ else
   // 		robot->pos->SetTurnSpeed( 0 );
   // }
   */		
+  
   return 0; // run again
 }
 
-bool Static_scan(double angle_start, double angle_end, double rot_speed, scan_t scan, robot_t* robot, Pose pose, double distance)
+bool Static_scan(double angle_start, double scan_fov, double rot_speed, scan_t* scan, robot_t* robot, Pose pose, double distance)
 {
   static bool scan_init = true, scan_pending=false, scan_finished = false;
-  double diff_orientation;
+  static int ii;
+  static double rotation_angle=0;
+  double diff_orientation, speedW;
   
    if (scan_init==true)
   {
+     scan_finished=false;
     diff_orientation=normalize(pose.a-angle_start);
     if( Absolute(diff_orientation) >0.01) // go to angle_start
     {
-      robot->pos->SetSpeed( 0,0,-diff_orientation*5 );	//P controller
+      printf("Rotate to the start angle %.3f\n", diff_orientation);
+      if(diff_orientation*10>maximal_wheel_speed/robot_radius)
+	speedW=-maximal_wheel_speed;
+      else if(diff_orientation*10<-maximal_wheel_speed/robot_radius)
+	speedW=maximal_wheel_speed;
+      else
+	speedW=-diff_orientation*10;
+      robot->pos->SetSpeed( 0,0,speedW );	//P controller
     }
     else
     {
-      scan_init=false;
-      printf( "Scan  start\n" );
-      scan.length=0;
-      robot->pos->SetTurnSpeed(rot_speed);
+      ii=0;
+      rotation_angle=0;
       scan_init=false;
       scan_pending=true;
-      scan_finished=false;
-      scan.past_pose.x=pose.x;
-      scan.past_pose.y=pose.y;
-      scan.orientation_start=angle_start;
-      scan.orientation_end=angle_end;
-      scan.orientation[scan.length]=pose.a;
-      scan.range[scan.length]=distance;
-      scan.min[1]=distance;
-      scan.min[0]=scan.length;
-      scan.max[1]=distance;
-      scan.max[0]=scan.length;
+      scan->past_pose.x=pose.x;
+      scan->past_pose.y=pose.y;
+      scan->orientation_start=angle_start;
+      if( rot_speed>=0 )
+	scan->orientation_end=normalize(angle_start+scan_fov);
+      else
+	scan->orientation_end=normalize(angle_start-scan_fov);
+      scan->orientation[ii]=pose.a;
+      scan->range[ii]=distance;
+      scan->min[1]=distance;
+      scan->min[0]=ii;
+      scan->max[1]=distance;
+      scan->max[0]=ii;
+      printf( "Scan  start\n" );
       robot->pos->SetTurnSpeed(rot_speed);
-      scan.length++;
+      ii++;
     }
   }
   else if(scan_pending == true) // until scan is finished
   {
-    if( ( (pose.a+0.0001) > scan.orientation_start) ||  ( pose.a < scan.orientation_start-0.1 )  ) // to symetrise, doesn't work when clockwise rotation
+    if( rotation_angle < scan_fov ) // to symetrise, doesn't work when clockwise rotation
     {
-      scan.orientation[scan.length]=pose.a;
-      scan.range[scan.length]=distance;
-      if(scan.min[1]>distance)
+      scan->orientation[ii]=pose.a;
+      scan->range[ii]=distance;
+      if(scan->min[1]>distance)
       {
-	scan.min[1]=distance;
-	scan.min[0]=scan.length;
+	scan->min[1]=distance;
+	scan->min[0]=ii;
       }
-      if(scan.max[1]<distance)
+      if(scan->max[1]<distance)
       {
-	scan.max[1]=distance;
-	scan.max[0]=scan.length;
+	scan->max[1]=distance;
+	scan->max[0]=ii;
       }
-      printf("\rScanning[%d%]",scan.length*100/410);
-      //printf("%.2f, %.2f\n",pose.a, distance);
-      scan.length++;
+      rotation_angle+=Absolute(normalize(pose.a-normalize(rotation_angle+scan->orientation_start)));
+      printf("\rScanning[%d%]",(ii*100)/410);
+      ii++;
     }
     else// one turn --> stop
     {
       robot->pos->SetTurnSpeed(0);
+      scan->length=ii-1;
       scan_pending=false;// finish rotation
       scan_finished=true;
       //improve choice of direction
-      if(false)
+      if(true)
       {
-      double delta=(scan.orientation_start-scan.orientation_end)/scan.length;
-      int k=5; //width of the window : k*delta
-      double *optimal_r = (double *)malloc((scan.length+1)*sizeof(double));
-      for(int i=0; i<(scan.length-k); i++)
-      {
-	 double small_r=9999;
-	 for(int j=i; j<i+k; j++ )
-	 {
-	   if(scan.range[j] < small_r)
-	     small_r = scan.range[j];
-	 }
-	 optimal_r[i] = small_r;
+	double delta=(scan_fov)/(1.0*scan->length);
+	printf("delta:%.2lf\n",delta);
+	int k=21; //width of the window : k*delta
+	double *optimal_r = (double *)malloc((scan->length+1)*sizeof(double));
+	double *average_r = (double *)malloc((scan->length+1)*sizeof(double));
+	for(int i=0; i<(scan->length-k); i++)
+	{
+	  double small_r=9999;
+	  average_r[i]=0.0;
+	  for(int j=i; j<i+k; j++ )
+	  {
+	    if( (scan->range[j]-1) < small_r)
+	      small_r = scan->range[j]-1;
+	    average_r[i] = average_r[i]+scan->range[j]-1;
+	  }
+	  optimal_r[i] = small_r;
+	  average_r[i] = average_r[i]/(1.0*k);
+	}
+	double large_r = -1;
+	int index_r=0;
+	for(int i=0; i<(scan->length-k); i++)
+	{
+	  double tmp;
+	  tmp = 2.0* optimal_r[i] * sin(delta*(k-1)/2.0); 
+	  printf("[%d], tmp:%.2lf, optimal_r:%.2lf, large_r:%.2lf\n",i,tmp,average_r[i],large_r);
+	  if(tmp > (2.0*robot_radius*1.5) && average_r[i] > large_r)
+	  {
+	    large_r = average_r[i];
+	    index_r = i;
+	  }
+	}
+	scan->max[1] = scan->range[index_r+(int)(k/2)];
+	scan->max[0] = scan->orientation[index_r+(int)(k/2)];
+	robot->goal_orientation = scan->orientation[index_r+(int)(k/2)];
+	printf("o:%.2lf,r:%.2lf,large_r:%.2lf\n",robot->goal_orientation,scan->max[1],large_r);
       }
-      double large_r = -1;
-      int index_r=0;
-      for(int i=0; i<(scan.length-k); i++)
-      {
-	 double tmp;
-	 tmp = 2.0* optimal_r[i] * sin(delta*k/2.0); 
-	 if(tmp > 2.0*robot_radius && optimal_r[i] > large_r)
-	 {
-	   large_r = optimal_r[i];
-	   index_r = i;
-	 }
-      }
-      scan.max[1] = scan.range[index_r+(int)(k/2)];
-      scan.max[0] = scan.orientation[index_r+(int)(k/2)];
-      robot->goal_orientation = scan.orientation[index_r+(int)(k/2)];
-      }
-      robot->goal_orientation=scan.orientation[(int)(scan.max[0])];//go farthest
+      else
+	robot->goal_orientation=scan->orientation[(int)(scan->max[0])];//go farthest
       
-      printf("\nEnd scan: #measurements %d, global goal: %.2f, orientation robot: %.2f, index %d\n",scan.length,robot->goal_orientation,pose.a,0);		
+      printf("\nEnd scan: #measurements %d, global goal: [%.2f %.2f], orientation robot: %.2f, index %d\n",scan->length,robot->goal_orientation,scan->max[1], pose.a,0);		
     }
   }
+  else
+    printf("Error scan\n");
   
   if (scan_finished==true)
   {

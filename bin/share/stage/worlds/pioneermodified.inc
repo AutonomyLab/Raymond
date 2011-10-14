@@ -166,9 +166,9 @@ define pioneer2dx pioneer2dx_base
 block( 
     points 4
     point[0] [0 0]
-    point[1] [0 0.4]
-    point[2] [0.4 0.4]
-    point[3] [0.4 0]
+    point[1] [0 0.25]
+    point[2] [0.25 0.25]
+    point[3] [0.25 0]
     #z [0 0.20]
   )
  mass 5

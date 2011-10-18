@@ -123,7 +123,7 @@ int LaserUpdate( Model* mod, robot_t* robot )
 
   
   if(scan_finished==false)
-    scan_finished = Static_scan(-PI/2.0+robot->goal_orientation, PI, 2, & scan, robot, pose, distance);
+    scan_finished = Static_scan(-PI/3.0+robot->goal_orientation, 2*PI/3, 2, & scan, robot, pose, distance);
   else
   {
     Motor_control(robot, 1,0,pose.a);
@@ -186,7 +186,7 @@ int LaserUpdate( Model* mod, robot_t* robot )
  
     if(scan.max[1] > 6)
       scan.max[1]=6;
-    if ( distance_traveled> scan.max[1]-1 )
+    if ( distance_traveled> scan.max[1] )
     {
       scan_finished=false;
       robot->pos->SetSpeed( 0,0,0 );
@@ -277,7 +277,7 @@ bool Static_scan(double angle_start, double scan_fov, double rot_speed, scan_t* 
   static bool scan_init = true, scan_pending=false, scan_finished = false;
   static int ii;
   static double rotation_angle=0;
-  double diff_orientation, speedW;
+  double diff_orientation;
   
    if (scan_init==true)
   {
@@ -285,14 +285,8 @@ bool Static_scan(double angle_start, double scan_fov, double rot_speed, scan_t* 
     diff_orientation=normalize(pose.a-angle_start);
     if( Absolute(diff_orientation) >0.01) // go to angle_start
     {
-      printf("Rotate to the start angle %.3f\n", diff_orientation);
-      if(diff_orientation*10>maximal_wheel_speed/robot_radius)
-	speedW=-maximal_wheel_speed;
-      else if(diff_orientation*10<-maximal_wheel_speed/robot_radius)
-	speedW=maximal_wheel_speed;
-      else
-	speedW=-diff_orientation*10;
-      robot->pos->SetSpeed( 0,0,speedW );	//P controller
+      printf("\nRotate to the start angle %.3f ", diff_orientation);
+      Motor_control(robot, 0, -diff_orientation*10, 0); 
     }
     else
     {
@@ -335,7 +329,8 @@ bool Static_scan(double angle_start, double scan_fov, double rot_speed, scan_t* 
 	scan->max[0]=ii;
       }
       rotation_angle+=Absolute(normalize(pose.a-normalize(rotation_angle+scan->orientation_start)));
-      printf("\rScanning[%d%]",(ii*100)/410);
+      printf("Distance= %.1f\n",distance);
+//       printf("\rScanning[%d%]",(ii*100)/410);
       ii++;
     }
     else// one turn --> stop
@@ -347,9 +342,9 @@ bool Static_scan(double angle_start, double scan_fov, double rot_speed, scan_t* 
       //improve choice of direction
       if(true)
       {
-	double delta=(scan_fov)/(1.0*scan->length);
+	double delta=(scan_fov)/(1.0*scan->length);//angular resolution of the scan
 	printf("delta:%.2lf\n",delta);
-	int k=21; //width of the window : k*delta
+	int k=10; //width of the window : k*delta
 	double *optimal_r = (double *)malloc((scan->length+1)*sizeof(double));
 	double *average_r = (double *)malloc((scan->length+1)*sizeof(double));
 	for(int i=0; i<(scan->length-k); i++)
@@ -371,17 +366,17 @@ bool Static_scan(double angle_start, double scan_fov, double rot_speed, scan_t* 
 	{
 	  double tmp;
 	  tmp = 2.0* optimal_r[i] * sin(delta*(k-1)/2.0); 
-	  printf("[%d], tmp:%.2lf, optimal_r:%.2lf, large_r:%.2lf\n",i,tmp,average_r[i],large_r);
 	  if(tmp > (2.0*robot_radius*1.5) && average_r[i] > large_r)
 	  {
 	    large_r = average_r[i];
 	    index_r = i;
 	  }
+	   printf("[%d], tmp:%.2lf, optimal_r:%.2lf, large_r:%.2lf\n",i,tmp,optimal_r[i],large_r);
 	}
-	scan->max[1] = scan->range[index_r+(int)(k/2)];
+	scan->max[1] = optimal_r[index_r];
 	scan->max[0] = scan->orientation[index_r+(int)(k/2)];
 	robot->goal_orientation = scan->orientation[index_r+(int)(k/2)];
-	printf("o:%.2lf,r:%.2lf,large_r:%.2lf\n",robot->goal_orientation,scan->max[1],large_r);
+	printf("\nChoice parameters:Width %.2f*, Goal %.2lf*, Dist to travel %.2lfm, Average %.2lfm\n",k*delta*180.0/PI,robot->goal_orientation*180.0/PI,scan->max[1],large_r);
       }
       else
 	robot->goal_orientation=scan->orientation[(int)(scan->max[0])];//go farthest
@@ -437,7 +432,7 @@ int Motor_control(robot_t* robot, double speed, double rot_speed, double orienta
   
   // check if max wheel speed is overpassed
   coef=sqrt(2)/2;
-  rot_speed_radius=speedW*robot_radius;  // rot_speed_radius is rot. speed * radius of the robot in [m/s]
+  rot_speed_radius=speedW*robot_radius;  // rot_speed_radius is rot. speed * radius of the robot in [m/s], tangential speed
   v1=-coef*speedX + coef*speedY + rot_speed_radius;
   v2=-coef*speedX - coef*speedY + rot_speed_radius;
   v3= coef*speedX - coef*speedY + rot_speed_radius;
@@ -457,7 +452,7 @@ int Motor_control(robot_t* robot, double speed, double rot_speed, double orienta
     speedX*=factor;
     speedY*=factor;
     speedW*=factor;
-    printf("Factor of max speed and max : %.2f %.2f\n", factor, max);
+    printf("Wheel speed too high ! factor [%.2f] max [%.2f]\n", factor, max);
   }
   
   robot->pos->SetSpeed(speedX,speedY,speedW );

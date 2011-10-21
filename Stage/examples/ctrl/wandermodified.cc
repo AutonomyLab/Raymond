@@ -9,10 +9,16 @@ const double minfrontdistance = 1.3;
 const double coef_forgetting = 0.98;
 const double scan_angle = PI/4; //scan from "scan_angle" to -"scan_angle"
 const double scan_speed = 2; // rotational speed during the scan [rad/s]
+const int scan_analyse = 1; // choose the algorithm you want{ 0:FirstMax, 1:FixedMovingWindow }
+
+//robot
 const double maximal_wheel_speed = 2.6;// rot_wheel_speed * wheel_radius in [m/s]
 const double robot_radius = 0.20;//[m]
+
+//Sensor
+const double sensor_max_range = 10; //max range of the sensor [m]
+const double sensor_min_range = 0.2; //min range of the sensor [m]
 const double sensor_precision = 0.005;
-const int scan_analyse = 1; // choose the algorithm you want{ 0:FirstMax, 1:FixedMovingWindow }
 
 const double cruisespeed = 0.4; 
 const double avoidturn = 0.1;
@@ -105,6 +111,11 @@ int LaserUpdate( Model* mod, robot_t* robot )
   else
     distance=new_scan[1];
   
+  if(distance > sensor_max_range)
+    distance = sensor_max_range;
+  if(distance < sensor_min_range)
+     distance = sensor_min_range;
+  
   //bool obstruction = false;
   //bool stop = false;
   // find the closest distance to the left and right and check if
@@ -128,7 +139,6 @@ int LaserUpdate( Model* mod, robot_t* robot )
   Pose pose = robot->pos->GetPose();
  // static Pose past_pose;
 
-  
   if(scan_finished==false)
   {
     if(init==true)
@@ -443,30 +453,29 @@ void FixedMovingWindow( scan_t* scan, robot_t* robot)
   int k=10; //width of the window : k*delta
   double *optimal_r = (double *)malloc((scan->length+1)*sizeof(double));
   double *average_r = (double *)malloc((scan->length+1)*sizeof(double));
+  
   for(int i=0; i<(scan->length-k); i++)
   {
-    double small_r=9999;
+    double small_r=sensor_max_range;
     average_r[i]=0.0;
-    for(int j=i; j<i+k; j++ )
+    for(int j=i; j<i+k; j++ ) // search the min and the average for each window
     {
-      if( (scan->range[j]-1) < small_r)//int argc, char** argv
+      if( (scan->range[j]) < small_r)
       {  
-	small_r = scan->range[j]-1;
-	if(small_r < 0)
-	  small_r=0;
+	small_r = scan->range[j];
       }
-      if(scan->range[j] > 1)
-	average_r[i] = average_r[i]+scan->range[j]-1;	    
+      average_r[i] = average_r[i]+scan->range[j];
     }
     optimal_r[i] = small_r;
     average_r[i] = average_r[i]/(1.0*k);
   }
+  
   double large_r = -1;
   int index_r=0;
   for(int i=0; i<(scan->length-k); i++)
   {
     double tmp;
-    tmp = 2.0* optimal_r[i] * sin(scan->delta*(k-1)/2.0); 
+    tmp = 2.0* (optimal_r[i]-0.5) * sin(scan->delta*(k-1)/2.0); 
     if(tmp > (2.0*robot_radius*1.5) && average_r[i] > large_r)
     {
       large_r = average_r[i];
@@ -474,13 +483,15 @@ void FixedMovingWindow( scan_t* scan, robot_t* robot)
     }
     printf("[%d], tmp:%.2lf, optimal_r:%.2lf, large_r:%.2lf\n",i,tmp,optimal_r[i],large_r);
   }
-  
-  scan->max[1] = optimal_r[index_r];
-  scan->max[0] = scan->orientation[index_r+(int)(k/2)];
-  robot->goal_orientation = scan->orientation[index_r+(int)(k/2)];
-  if(large_r < 0.2)
-  { 
-    scan->max[1] = 0.0;
+  if(optimal_r[index_r]>1 && large_r>1)
+  {
+    scan->max[1] = optimal_r[index_r]-1;
+    scan->max[0] = scan->orientation[index_r+(int)(k/2)];
+    robot->goal_orientation = scan->orientation[index_r+(int)(k/2)];
+  }
+  else
+  {
+    scan->max[1] = 0;
     robot->goal_orientation = normalize(robot->goal_orientation - scan_angle*0.5);
     printf("so small : large_r: %.2lf, goal_orientation %.2lf\n",large_r,robot->goal_orientation);
   }

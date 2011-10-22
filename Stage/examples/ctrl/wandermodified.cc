@@ -9,11 +9,12 @@ const double minfrontdistance = 1.3;
 const double coef_forgetting = 0.98;
 const double scan_angle = PI/4; //scan from "scan_angle" to -"scan_angle"
 const double scan_speed = 2; // rotational speed during the scan [rad/s]
-const int scan_analyse = 1; // choose the algorithm you want{ 0:FirstMax, 1:FixedMovingWindow }
+const int scan_analyse = 2; // choose the algorithm you want{ 0:FirstMax, 1:FixedMovingWindow, 2:FocusOnMax }
 
 //robot
-const double maximal_wheel_speed = 2.6;// rot_wheel_speed * wheel_radius in [m/s]
-const double robot_radius = 0.20;//[m]
+const double maximal_wheel_speed = 2.6; // rot_wheel_speed * wheel_radius in [m/s]
+const double robot_radius = 0.20; //[m]
+const double dist_safe = 0.3; // [m] 
 
 //Sensor
 const double sensor_max_range = 10; //max range of the sensor [m]
@@ -40,6 +41,7 @@ typedef struct
   ModelRanger* laser;
   int avoidcount, randcount;
   double goal_orientation;
+  double goal_distance;
 } robot_t;
 
 typedef struct
@@ -56,6 +58,7 @@ typedef struct
 } scan_t;
 
 bool Static_scan(double angle_start, double scan_fov, double rot_speed, scan_t* scan, robot_t* robot, Pose pose, double distance);
+void FocusOnMax(scan_t* scan, robot_t* robot);
 void FixedMovingWindow( scan_t* scan, robot_t* robot);
 int LaserUpdate( Model* mod, robot_t* robot );
 int PositionUpdate( Model* mod, robot_t* robot );
@@ -154,7 +157,7 @@ int LaserUpdate( Model* mod, robot_t* robot )
   }
   else
   {
-    if(scan.max[1]<0)
+    if(robot->goal_distance<0)
        Motor_control(robot, -maximal_wheel_speed,0,pose.a);
     else
       Motor_control(robot, maximal_wheel_speed,0,pose.a);
@@ -213,11 +216,9 @@ int LaserUpdate( Model* mod, robot_t* robot )
     stepcount++*/;
     
     distance_traveled=Norm_vector(pose.x-scan.past_pose.x, pose.y-scan.past_pose.y);
-    printf("Go straight until %.1f m. Distance travelled: %.2f m\n",scan.max[1], distance_traveled);
+    printf("Go straight until %.1f m. Distance travelled: %.2f m\n",robot->goal_distance, distance_traveled);
  
-//     if(scan.max[1] > 6)
-//       scan.max[1]=6;
-    if ( distance_traveled> Absolute(scan.max[1]) )
+    if ( distance_traveled> Absolute(robot->goal_distance) )
     {
       scan_finished=false;
       init=true;
@@ -375,64 +376,15 @@ bool Static_scan(double angle_start, double scan_fov, double rot_speed, scan_t* 
       scan->length=ii-1;
       scan_pending=false;// finish rotation
       scan_finished=true;
-     
-//       if(true)
-//       {
-// 	int k=10; //width of the window : k*delta
-// 	double *optimal_r = (double *)malloc((scan->length+1)*sizeof(double));
-// 	double *average_r = (double *)malloc((scan->length+1)*sizeof(double));
-// 	for(int i=0; i<(scan->length-k); i++)
-// 	{
-// 	  double small_r=9999;
-// 	  average_r[i]=0.0;
-// 	  for(int j=i; j<i+k; j++ )
-// 	  {
-// 	    if( (scan->range[j]-1) < small_r)//int argc, char** argv
-// 	    {  
-// 	      small_r = scan->range[j]-1;
-// 	      if(small_r < 0)
-// 		 small_r=0;
-// 	    }
-// 	    if(scan->range[j] > 1)
-// 	      average_r[i] = average_r[i]+scan->range[j]-1;	    
-// 	  }
-// 	  optimal_r[i] = small_r;
-// 	  average_r[i] = average_r[i]/(1.0*k);
-// 	}
-// 	double large_r = -1;
-// 	int index_r=0;
-// 	for(int i=0; i<(scan->length-k); i++)
-// 	{
-// 	  double tmp;
-// 	  tmp = 2.0* optimal_r[i] * sin(scan->delta*(k-1)/2.0); 
-// 	  if(tmp > (2.0*robot_radius*1.5) && average_r[i] > large_r)
-// 	  {
-// 	    large_r = average_r[i];
-// 	    index_r = i;
-// 	  }
-// 	  printf("[%d], tmp:%.2lf, optimal_r:%.2lf, large_r:%.2lf\n",i,tmp,optimal_r[i],large_r);
-// 	}
-// 	
-// 	scan->max[1] = optimal_r[index_r];
-// 	scan->max[0] = scan->orientation[index_r+(int)(k/2)];
-// 	robot->goal_orientation = scan->orientation[index_r+(int)(k/2)];
-// 	if(large_r < 0.4)
-// 	{ 
-// 	  scan->max[1] = 0.0;
-// 	  robot->goal_orientation = normalize(robot->goal_orientation - scan_angle*0.5);
-// 	  printf("so small : large_r: %.2lf, goal_orientation %.2lf\n",large_r,robot->goal_orientation);
-// 	}
-// 	printf("\nChoice parameters:Width %.2f*, Goal %.2lf*, Dist to travel %.2lfm, Average %.2lfm\n",k*scan->delta*180.0/PI,robot->goal_orientation*180.0/PI,scan->max[1],large_r);
-//       }
-//       else
 
       switch(scan_analyse)
       {
 	case 0 : robot->goal_orientation=scan->orientation[(int)(scan->max[0])];break; // FirstMax go farthest
 	case 1 : FixedMovingWindow(scan,robot);break;// FixedMovingWindow
+	case 2 : FocusOnMax(scan,robot);break;
 	default : printf("\nWrong scan analyse !\n");break;
       }
-      printf("\nEnd scan: #measurements %d, global goal: [%.2f %.2f], orientation robot: %.2f, index %d\n",scan->length,robot->goal_orientation,scan->max[1], pose.a,0);		
+      printf("\nEnd scan: #measurements %d, global goal: [%.2f %.2f], orientation robot: %.2f\n",scan->length,robot->goal_orientation,robot->goal_distance, pose.a);		
     }
   }
   else
@@ -446,6 +398,76 @@ bool Static_scan(double angle_start, double scan_fov, double rot_speed, scan_t* 
   }
   else
     return false;
+}
+
+void FocusOnMax(scan_t* scan, robot_t* robot)
+{
+  int i,j=0,k,l, j_max,window_size;
+  double threshold_slope=0.5, threshold_diff_slope=0.9, slope0, slope1, diff_slope, alpha=0, optimal_i,optimal_r=0,dist_to_travel=0;
+  int *possible_i = (int *)malloc((scan->length)*sizeof(int));
+  double *possible_r = (double *)malloc((scan->length)*sizeof(double));
+  
+  optimal_i=robot->goal_orientation; // default value
+  
+  for(i=1;i<scan->length-2;i++) // find extremums in the scan
+  {
+    slope0 = scan->range[i]-scan->range[i-1];
+    slope1 = scan->range[i+1]-scan->range[i];
+    if(slope0 < -threshold_slope || slope1 > threshold_slope) //if slope is steep
+    {
+      diff_slope=Absolute( slope1-slope0 );
+      printf("slope : %.3f, %.3f\t acc: %.3f\n",slope0, slope1, diff_slope );
+      if( diff_slope > threshold_diff_slope ) //if slope_i is different from slope_i+1 
+      {
+	possible_i[j]=i;
+	possible_r[j]=scan->range[i];
+	printf("Extremum %d : orientation %.2f, range %.2f\n",j,scan->orientation[possible_i[j]], possible_r[j]);
+	j++;
+      }
+    }
+  }
+  
+  j_max=j;
+  for(j=0;j<j_max;j++) // check if extremums are good direction
+  {
+    alpha=asin( (robot_radius+dist_safe/2)/possible_r[j] );
+    window_size= (int)(alpha/scan->delta)+1;
+    printf("orientation %.2f, window %d, %.2f\n",scan->orientation[possible_i[j]],window_size, alpha);
+    bool *is_window_ok = (bool *)malloc((3*window_size)*sizeof(bool));
+    
+    for(k=0;k<3*window_size;k++) // moving the window
+    {
+      is_window_ok[k]=true;
+      printf(" window from %.2f to %.2f\n",scan->orientation[possible_i[j]+k-2*window_size], scan->orientation[possible_i[j]+k]-window_size);
+      for(l=0;l<window_size;l++) // check each sample in the window
+      {
+	if( possible_i[j]-window_size+k-l<0 || possible_i[j]-window_size+k-l>scan->length ) //avoid going out of the table
+	{
+	  is_window_ok[k]=false;
+	  printf("out of table\n");
+	}
+	if( scan->range[ possible_i[j]-window_size+k-l ] < possible_r[j] )
+	{
+	  is_window_ok[k]=false;
+	  //printf("Obstacle -> false: %.3f, %.3f\n",scan->range[ possible_i[j]-window_size+k-l ], possible_r[j]);
+	}
+	if( l == window_size-1 && is_window_ok[k]==true)// if the window is free
+	{
+	   if( possible_r[j] > optimal_r ) // if this window has the longest range, go in this direction
+	  {
+	    optimal_i=possible_i[j]+k - (int)(window_size/2);
+	    optimal_r=possible_r[j];
+	  }
+	  printf( "Window free = %.3f\n",scan->orientation[ possible_i[j]-window_size+k-l ] );
+	}
+      }
+    }
+  }
+  dist_to_travel = optimal_r*cos(alpha)-dist_safe;
+  if(dist_to_travel<0)
+    dist_to_travel=0;
+  robot->goal_orientation=optimal_i;
+  robot->goal_distance=dist_to_travel;
 }
 
 void FixedMovingWindow( scan_t* scan, robot_t* robot)
@@ -485,17 +507,17 @@ void FixedMovingWindow( scan_t* scan, robot_t* robot)
   }
   if(optimal_r[index_r]>1 && large_r>1)
   {
-    scan->max[1] = optimal_r[index_r]-1;
-    scan->max[0] = scan->orientation[index_r+(int)(k/2)];
+    //scan->max[0] = scan->orientation[index_r+(int)(k/2)];
+    robot->goal_distance= optimal_r[index_r]-1;
     robot->goal_orientation = scan->orientation[index_r+(int)(k/2)];
   }
   else
   {
-    scan->max[1] = 0;
+    robot->goal_distance=0;
     robot->goal_orientation = normalize(robot->goal_orientation - scan_angle*0.5);
     printf("so small : large_r: %.2lf, goal_orientation %.2lf\n",large_r,robot->goal_orientation);
   }
-  printf("\nChoice parameters:Width %.2f*, Goal %.2lf*, Dist to travel %.2lfm, Average %.2lfm\n",k*scan->delta*180.0/PI,robot->goal_orientation*180.0/PI,scan->max[1],large_r);
+  printf("\nChoice parameters:Width %.2f*, Goal %.2lf*, Dist to travel %.2lfm, Average %.2lfm\n",k*scan->delta*180.0/PI,robot->goal_orientation*180.0/PI,robot->goal_distance,large_r);
 }
 
 int PositionUpdate( Model* mod, robot_t* robot )

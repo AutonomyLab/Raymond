@@ -157,7 +157,7 @@ int LaserUpdate( Model* mod, robot_t* robot )
   }
   else
   {
-    if(robot->goal_distance<0)
+    if(robot->goal_distance<=0)
        Motor_control(robot, -maximal_wheel_speed,0,pose.a);
     else
       Motor_control(robot, maximal_wheel_speed,0,pose.a);
@@ -218,7 +218,7 @@ int LaserUpdate( Model* mod, robot_t* robot )
     distance_traveled=Norm_vector(pose.x-scan.past_pose.x, pose.y-scan.past_pose.y);
     printf("Go straight until %.1f m. Distance travelled: %.2f m\n",robot->goal_distance, distance_traveled);
  
-    if ( distance_traveled> Absolute(robot->goal_distance) )
+    if ( distance_traveled>= Absolute(robot->goal_distance) )
     {
       scan_finished=false;
       init=true;
@@ -402,12 +402,18 @@ bool Static_scan(double angle_start, double scan_fov, double rot_speed, scan_t* 
 
 void FocusOnMax(scan_t* scan, robot_t* robot)
 {
-  int i,j=0,k,l, j_max,window_size;
-  double threshold_slope=0.5, threshold_diff_slope=0.9, slope0, slope1, diff_slope, alpha=0, optimal_i,optimal_r=0,dist_to_travel=0;
+  int i,j=0,k,l, j_max, window_size, optimal_i, nb_consecutive_free_windows=0;
+  bool no_window_free=true;
+  double threshold_slope=0.5, threshold_diff_slope=0.9, slope0, slope1, diff_slope, alpha=0,optimal_r=0,dist_to_travel=0;
   int *possible_i = (int *)malloc((scan->length)*sizeof(int));
   double *possible_r = (double *)malloc((scan->length)*sizeof(double));
   
-  optimal_i=robot->goal_orientation; // default value
+  /* 
+  There are i samples in the scan
+  There are j discontinuities
+  There are k windows
+  There are l samples per window
+  */
   
   for(i=1;i<scan->length-2;i++) // find extremums in the scan
   {
@@ -438,36 +444,64 @@ void FocusOnMax(scan_t* scan, robot_t* robot)
     for(k=0;k<3*window_size;k++) // moving the window
     {
       is_window_ok[k]=true;
-      printf(" window from %.2f to %.2f\n",scan->orientation[possible_i[j]+k-2*window_size], scan->orientation[possible_i[j]+k]-window_size);
+      //printf(" window from %.2f to %.2f\n",scan->orientation[possible_i[j]+k-2*window_size], scan->orientation[possible_i[j]+k-window_size]);
       for(l=0;l<window_size;l++) // check each sample in the window
       {
 	if( possible_i[j]-window_size+k-l<0 || possible_i[j]-window_size+k-l>scan->length ) //avoid going out of the table
 	{
 	  is_window_ok[k]=false;
-	  printf("out of table\n");
+	 // printf("out of table\n");
 	}
-	if( scan->range[ possible_i[j]-window_size+k-l ] < possible_r[j] )
+	else
 	{
-	  is_window_ok[k]=false;
-	  //printf("Obstacle -> false: %.3f, %.3f\n",scan->range[ possible_i[j]-window_size+k-l ], possible_r[j]);
-	}
-	if( l == window_size-1 && is_window_ok[k]==true)// if the window is free
-	{
-	   if( possible_r[j] > optimal_r ) // if this window has the longest range, go in this direction
+	  if( scan->range[ possible_i[j]-window_size+k-l ] < possible_r[j] )
 	  {
-	    optimal_i=possible_i[j]+k - (int)(window_size/2);
-	    optimal_r=possible_r[j];
+	    is_window_ok[k]=false;
+	    //printf("Obstacle -> false: %.3f, %.3f\n",scan->range[ possible_i[j]-window_size+k-l ], possible_r[j]);
 	  }
-	  printf( "Window free = %.3f\n",scan->orientation[ possible_i[j]-window_size+k-l ] );
+	  if( l == window_size-1 && is_window_ok[k]==true)// if the window is free
+	  {
+	    no_window_free=false;
+	    if(k>=1 && is_window_ok[k-1]==true)//sum the number of consecutive free windows
+	    {
+	      nb_consecutive_free_windows++;
+	    }
+	    else
+	    {
+	      nb_consecutive_free_windows=0;
+	    }
+	    if( possible_r[j] >= optimal_r ) // if this window has the longest range, go in this direction
+	    {
+	      optimal_i=possible_i[j]+k-(int)(nb_consecutive_free_windows/2) -window_size-(int)(window_size/2);
+	      optimal_r=possible_r[j];
+	    }
+	    printf( "The window [%.3f %.3f] is free. CenterOfWindow: %.3f  RangeOfDiscontinuity: %.3f\n",scan->orientation[possible_i[j]+k-2*window_size], scan->orientation[possible_i[j]+k-window_size], scan->orientation[possible_i[j]+k - window_size-(int)(window_size/2)],  optimal_r);
+	  }
 	}
       }
     }
   }
-  dist_to_travel = optimal_r*cos(alpha)-dist_safe;
-  if(dist_to_travel<0)
-    dist_to_travel=0;
-  robot->goal_orientation=optimal_i;
-  robot->goal_distance=dist_to_travel;
+  
+  if(no_window_free==false)//go in the direction of the best window
+  {
+    dist_to_travel = optimal_r-dist_safe;
+    if(dist_to_travel<0)
+    {
+      dist_to_travel=0;
+      robot->goal_orientation-=scan_angle/4;
+    }
+    else
+    {
+      robot->goal_orientation=scan->orientation[optimal_i];
+    }
+    robot->goal_distance=dist_to_travel;
+  }
+  else // rotate a little bit and rescan
+  {
+    printf("No window free\n");
+    robot->goal_orientation-=scan_angle/4;
+    robot->goal_distance=0;
+  }
 }
 
 void FixedMovingWindow( scan_t* scan, robot_t* robot)

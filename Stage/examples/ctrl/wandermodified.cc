@@ -7,14 +7,14 @@ using namespace Stg;
 const double avoidspeed = 1.6; 
 const double minfrontdistance = 1.3;
 const double coef_forgetting = 0.98;
-const double scan_angle = PI/4; //scan from "scan_angle" to -"scan_angle"
+const double scan_angle = PI/3; //scan from "scan_angle" to -"scan_angle"
 const double scan_speed = 2; // rotational speed during the scan [rad/s]
 const int scan_analyse = 2; // choose the algorithm you want{ 0:FirstMax, 1:FixedMovingWindow, 2:FocusOnMax }
 
 //robot
 const double maximal_wheel_speed = 2.6; // rot_wheel_speed * wheel_radius in [m/s]
 const double robot_radius = 0.20; //[m]
-const double dist_safe = 0.3; // [m] 
+const double dist_safe = 0.5; // [m] 
 
 //Sensor
 const double sensor_max_range = 10; //max range of the sensor [m]
@@ -443,39 +443,46 @@ void FocusOnMax(scan_t* scan, robot_t* robot)
     
     for(k=0;k<3*window_size;k++) // moving the window
     {
-      is_window_ok[k]=true;
-      //printf(" window from %.2f to %.2f\n",scan->orientation[possible_i[j]+k-2*window_size], scan->orientation[possible_i[j]+k-window_size]);
-      for(l=0;l<window_size;l++) // check each sample in the window
+      if(k>0.8*window_size && k<2.2*window_size) // do not check these windows because the extremum is in these windows
       {
-	if( possible_i[j]-window_size+k-l<0 || possible_i[j]-window_size+k-l>scan->length ) //avoid going out of the table
+	is_window_ok[k]=false;
+      }
+      else
+      {
+	is_window_ok[k]=true;
+	//printf(" window from %.2f to %.2f\n",scan->orientation[possible_i[j]+k-2*window_size], scan->orientation[possible_i[j]+k-window_size]);
+	for(l=0;l<window_size;l++) // check each sample in the window
 	{
-	  is_window_ok[k]=false;
-	 // printf("out of table\n");
-	}
-	else
-	{
-	  if( scan->range[ possible_i[j]-window_size+k-l ] < possible_r[j] )
+	  if( possible_i[j]-window_size+k-l<0 || possible_i[j]-window_size+k-l>scan->length ) //avoid going out of the table
 	  {
 	    is_window_ok[k]=false;
-	    //printf("Obstacle -> false: %.3f, %.3f\n",scan->range[ possible_i[j]-window_size+k-l ], possible_r[j]);
+	    // printf("out of table\n");
 	  }
-	  if( l == window_size-1 && is_window_ok[k]==true)// if the window is free
+	  else
 	  {
-	    no_window_free=false;
-	    if(k>=1 && is_window_ok[k-1]==true)//sum the number of consecutive free windows
+	    if( scan->range[ possible_i[j]-window_size+k-l ] < possible_r[j] )
 	    {
-	      nb_consecutive_free_windows++;
+	      is_window_ok[k]=false;
+	      //printf("Obstacle -> false: %.3f, %.3f\n",scan->range[ possible_i[j]-window_size+k-l ], possible_r[j]);
 	    }
-	    else
+	    if( l == window_size-1 && is_window_ok[k]==true)// if the window is free
 	    {
-	      nb_consecutive_free_windows=0;
+	      no_window_free=false;
+	      if(k>=1 && is_window_ok[k-1]==true)//sum the number of consecutive free windows
+	      {
+		nb_consecutive_free_windows++;
+	      }
+	      else
+	      {
+		nb_consecutive_free_windows=0;
+	      }
+	      if( possible_r[j] >= optimal_r ) // if this window has the longest range, go in this direction
+	      {
+		optimal_i=possible_i[j]+k-(int)(nb_consecutive_free_windows/2) -window_size-(int)(window_size/2);
+		optimal_r=possible_r[j];
+	      }
+	      printf( "The window [%.3f %.3f] is free. CenterOfWindow: %.3f  RangeOfDiscontinuity: %.3f\n",scan->orientation[possible_i[j]+k-2*window_size], scan->orientation[possible_i[j]+k-window_size], scan->orientation[possible_i[j]+k - window_size-(int)(window_size/2)],  optimal_r);
 	    }
-	    if( possible_r[j] >= optimal_r ) // if this window has the longest range, go in this direction
-	    {
-	      optimal_i=possible_i[j]+k-(int)(nb_consecutive_free_windows/2) -window_size-(int)(window_size/2);
-	      optimal_r=possible_r[j];
-	    }
-	    printf( "The window [%.3f %.3f] is free. CenterOfWindow: %.3f  RangeOfDiscontinuity: %.3f\n",scan->orientation[possible_i[j]+k-2*window_size], scan->orientation[possible_i[j]+k-window_size], scan->orientation[possible_i[j]+k - window_size-(int)(window_size/2)],  optimal_r);
 	  }
 	}
       }

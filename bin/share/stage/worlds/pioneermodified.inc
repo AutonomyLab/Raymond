@@ -3,6 +3,48 @@
 # Date: 10 Jun 2002
 # CVS: $Id: pioneer.inc,v 1.30 2008-01-15 01:25:42 rtv Exp $
 
+#### Myrobot ####
+define pioneer2dx pioneer_base
+(  
+	size [0.3 0.3 0.07]
+  # simplified Body shape:p
+	block( 
+	    points 4
+	    point[0] [0 0]
+	    point[1] [1 0]
+	    point[2] [1 1]
+	    point[3] [0 1]
+	    z [0 1]
+	  )
+	mass 5
+	drive "omni"	
+)
+
+#### Myrobot's sensor ####
+define myrobot_laser ranger
+(
+	size [0.06 0.03 0.1]
+	pose [-0.1 0 0.01 0]
+	color "blue"
+	update_interval 10
+	
+	sensor
+	(
+		range [ 0.2 10 ]
+		fov 0			# only one laser beam
+		samples 1 
+	)	
+	
+	block(
+		points 4
+    point[0] [0 0]
+    point[1] [1 0]
+    point[2] [1 1]
+    point[3] [0 1]
+    z [0 1]
+	)
+)
+
 # The Pioneer2DX sonar array
 
 #  prototype for p2dx sonar sensors
@@ -156,39 +198,6 @@ define pioneer2dx_base_front_sonar pioneer2dx_base_no_sonar
   # use the sonar array defined above with a small vertical offset to
   # drop the sensors into the robot body
   p2dx_sonar_front( pose [0 0 -0.03 0] ) 
-)
-
-
-define pioneer2dx pioneer2dx_base
-(  
-  # simplified Body shape:
-	  
-block( 
-    points 4
-    point[0] [0 0]
-    point[1] [0 0.25]
-    point[2] [0.25 0.25]
-    point[3] [0.25 0]
-    #z [0 0.20]
-  )
- mass 5
-drive "omni"
-
-	
-)
-
-#myrobot's sensor
-define myrobot_laser ranger
-(
-	sensor
-	(
-		range [ 0.2 10 ]
-		fov 1
-		samples 3 
-	)	
-	size [0.05 0.03 0.05]
-	color "green"
-	update_interval 10
 )
 
 # as above, but with front sonar only

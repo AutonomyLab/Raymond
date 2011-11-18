@@ -7,32 +7,37 @@ using namespace Stg;
 const double avoidspeed = 1.6; 
 const double minfrontdistance = 1.3;
 const double coef_forgetting = 0.98;
-const double scan_angle = PI/3; //scan from "scan_angle" to -"scan_angle"
+const double scan_angle = PI; //scan from "scan_angle" to -"scan_angle"
 const double scan_speed = 2; // rotational speed during the scan [rad/s]
-const int scan_analyse = 2; // choose the algorithm you want{ 0:FirstMax, 1:FixedMovingWindow, 2:FocusOnMax }
+const int scan_analyse = 3; // choose the algorithm you want{ 0:FirstMax, 1:FixedMovingWindow, 2:FocusOnMax 3:FollowWall}
 
 //robot
 const double maximal_wheel_speed = 2.6; // rot_wheel_speed * wheel_radius in [m/s]
 const double robot_radius = 0.20; //[m]
 const double dist_safe = 0.5; // [m] 
+const double odometry_precision = 0.001;//[m] and [radian]
 
 //Sensor
 const double sensor_max_range = 10; //max range of the sensor [m]
 const double sensor_min_range = 0.2; //min range of the sensor [m]
 const double sensor_precision = 0.005;
+const bool with_noise = false; // for the laser and the position
 
 const double cruisespeed = 0.4; 
 const double avoidturn = 0.1;
 const bool verbose = false;
-const bool with_noise = true;
+
 const double stopdist = 0.3;
 const int avoidduration = 10;
 int stepcount = 0;
+
+bool FollowWall_activated=false;
 
 typedef struct
 {
   double x;
   double y;
+  Pose pose;
 } vector_t;
 
 typedef struct
@@ -57,6 +62,8 @@ typedef struct
   vector_t past_pose; 
 } scan_t;
 
+bool FollowWall(scan_t* scan, robot_t* robot, Pose pose, double distance );
+bool LeastSquares( vector_t data[], int data_length, vector_t* parameters);
 bool Static_scan(double angle_start, double scan_fov, double rot_speed, scan_t* scan, robot_t* robot, Pose pose, double distance);
 void FocusOnMax(scan_t* scan, robot_t* robot);
 void FixedMovingWindow( scan_t* scan, robot_t* robot);
@@ -71,30 +78,30 @@ double Simple_normal_deviate( double mean, double stddev );
 extern "C" int Init( Model* mod, CtrlArgs* args )
 {
   // local arguments
-	/*  printf( "\nWander controller initialised with:\n"
-			"\tworldfile string \"%s\"\n" 
-			"\tcmdline string \"%s\"",
-			args->worldfile.c_str(),
-			args->cmdline.c_str() );
-	*/
-
+  /*  printf( "\nWander controller initialised with:\n"
+  "\tworldfile string \"%s\"\n" 
+  "\tcmdline string \"%s\"",
+  args->worldfile.c_str(),
+  args->cmdline.c_str() );
+  */
+  
   robot_t* robot = new robot_t;
   
- 
+  
   robot->avoidcount = 0;
   robot->randcount = 0;
   
   robot->pos = (ModelPosition*)mod;
-
+  
   if( verbose )
     robot->pos->AddCallback( Model::CB_UPDATE, (model_callback_t)PositionUpdate, robot );
-
+  
   robot->pos->Subscribe(); // starts the position updates
-
-  robot->laser = (ModelRanger*)mod->GetChild( "ranger:1" );
+  
+  robot->laser = (ModelRanger*)mod->GetChild( "ranger:0" );
   robot->laser->AddCallback( Model::CB_UPDATE, (model_callback_t)LaserUpdate, robot );
   robot->laser->Subscribe(); // starts the ranger updates
-   
+  
   return 0; //ok
 }
 
@@ -102,22 +109,20 @@ extern "C" int Init( Model* mod, CtrlArgs* args )
 // inspect the ranger data and decide what to do
 int LaserUpdate( Model* mod, robot_t* robot )
 {
-    // get the data
+  // get the data
   const std::vector<meters_t>& new_scan = robot->laser->GetRanges();
   uint32_t sample_count = new_scan.size();
   if( sample_count < 1 )
     return 0;
   
-  double distance;
+  double distance=new_scan[0];
   if (with_noise==true)
-    distance=Simple_normal_deviate(0, sensor_precision)+new_scan[1];
-  else
-    distance=new_scan[1];
+    distance+=Simple_normal_deviate(0, sensor_precision);
   
   if(distance > sensor_max_range)
     distance = sensor_max_range;
   if(distance < sensor_min_range)
-     distance = sensor_min_range;
+    distance = sensor_min_range;
   
   //bool obstruction = false;
   //bool stop = false;
@@ -132,16 +137,18 @@ int LaserUpdate( Model* mod, robot_t* robot )
   static double angle_start=scan_angle, rot_speed=-scan_speed;
   //double speedX,speedY,orientation;
   //double tmp_orientation;
-
+  
   //static bool rotate_clockwise = true;
   
   //static double pos_start;
   //static int i=0;
   static scan_t scan;
   //static vector_t vector_avoidance, speed_avoidance;
-  Pose pose = robot->pos->GetPose();
- // static Pose past_pose;
+  
+  Pose pose = robot->pos->GetPose();; 
 
+  // static Pose past_pose;
+  
   if(scan_finished==false)
   {
     if(init==true)
@@ -155,10 +162,14 @@ int LaserUpdate( Model* mod, robot_t* robot )
       scan_finished = Static_scan(angle_start+robot->goal_orientation, 2*scan_angle, rot_speed, & scan, robot, pose, distance);  
     }
   }
+  else if(FollowWall_activated==true)
+  {
+    FollowWall(& scan, robot, pose, distance);
+  }
   else
   {
     if(robot->goal_distance<=0)
-       Motor_control(robot, -maximal_wheel_speed,0,pose.a);
+      Motor_control(robot, -maximal_wheel_speed,0,pose.a);
     else
       Motor_control(robot, maximal_wheel_speed,0,pose.a);
     
@@ -173,57 +184,57 @@ int LaserUpdate( Model* mod, robot_t* robot )
       {
 	//printf("clockwise\n"); 
 	robot->pos->SetSpeed( 0,0,-8 );
-      }
-      else
-      {
-	//printf("counterclockwise\n");
-	robot->pos->SetSpeed( 0,0,8 );
-      }
-      //printf("Rotate, goal orientation %.2f robotX %.2f, robotY %.2f robot orientation %.2f\n", robot->goal_orientation, pose.x, pose.y, pose.a);
-      
-    }
-    else
+  }
+  else
+  {
+    //printf("counterclockwise\n");
+    robot->pos->SetSpeed( 0,0,8 );
+  }
+  //printf("Rotate, goal orientation %.2f robotX %.2f, robotY %.2f robot orientation %.2f\n", robot->goal_orientation, pose.x, pose.y, pose.a);
+  
+  }
+  else
+  {
+    robot->pos->SetTurnSpeed(0);
+    double coef_avoidance=0;
+    tmp_orientation = normalize(robot->goal_orientation - pose.a);
+    vector_avoidance.x*=coef_forgetting;
+    vector_avoidance.y*=coef_forgetting;
+    if(distance<minfrontdistance)//distance current distances
     {
-      robot->pos->SetTurnSpeed(0);
-      double coef_avoidance=0;
-      tmp_orientation = normalize(robot->goal_orientation - pose.a);
-      vector_avoidance.x*=coef_forgetting;
-      vector_avoidance.y*=coef_forgetting;
-      if(distance<minfrontdistance)//distance current distances
+      printf("avoid %.2lf\n",distance);
+      coef_avoidance=0.4/(1.0*distance);
+      if (coef_avoidance>avoidspeed)
+	coef_avoidance=avoidspeed;
+      vector_avoidance.x+=coef_avoidance*cos(pose.a+PI); //vector_avoidance global repulsive vector
+      vector_avoidance.y+= coef_avoidance*sin(pose.a+PI);
+      double norm;
+      norm=Norm_vector(vector_avoidance.x,vector_avoidance.y);
+      if(norm>avoidspeed)
       {
-	printf("avoid %.2lf\n",distance);
-	coef_avoidance=0.4/(1.0*distance);
-	if (coef_avoidance>avoidspeed)
-	  coef_avoidance=avoidspeed;
-	vector_avoidance.x+=coef_avoidance*cos(pose.a+PI); //vector_avoidance global repulsive vector
-	vector_avoidance.y+= coef_avoidance*sin(pose.a+PI);
-	double norm;
-	norm=Norm_vector(vector_avoidance.x,vector_avoidance.y);
-	if(norm>avoidspeed)
-	{
-	  vector_avoidance.x/=norm/avoidspeed;
-	  vector_avoidance.y/=norm/avoidspeed;
-	}
+	vector_avoidance.x/=norm/avoidspeed;
+	vector_avoidance.y/=norm/avoidspeed;
       }
-      speed_avoidance.x = vector_avoidance.x*cos(pose.a) - vector_avoidance.y*sin(pose.a); // vector in the robot frame
-      speed_avoidance.y = vector_avoidance.x*sin(pose.a) + vector_avoidance.y*cos(pose.a); 	
-      speedX= cos(tmp_orientation)+speed_avoidance.x;
-      speedY= sin(tmp_orientation)+speed_avoidance.y; 
-      robot->pos->SetSpeed(speedX,speedY,0 );
-      //printf("robot orientation %.2f goal orientation %.2f robotX %.2f, robotY %.2f, tmp_orientation %.2f,  SpeedX: %.2f, SpeedY: %.2f\n", pose.a, robot->goal_orientation, pose.x, pose.y,tmp_orientation,speedX, speedY);	
-      printf("Coef: %.3f Vector[%.3f %.3f] Speed_avoidance [%.3f %.3f] Speed [%.2f %.2f] \n",coef_avoidance,vector_avoidance.x, vector_avoidance.y,speed_avoidance.x, speed_avoidance.y, speedX,speedY);
-    }
-    stepcount++*/;
-    
-    distance_traveled=Norm_vector(pose.x-scan.past_pose.x, pose.y-scan.past_pose.y);
-    printf("Go straight until %.1f m. Distance travelled: %.2f m\n",robot->goal_distance, distance_traveled);
- 
-    if ( distance_traveled>= Absolute(robot->goal_distance) )
-    {
-      scan_finished=false;
-      init=true;
-      robot->pos->SetSpeed( 0,0,0 );
-    }
+  }
+  speed_avoidance.x = vector_avoidance.x*cos(pose.a) - vector_avoidance.y*sin(pose.a); // vector in the robot frame
+  speed_avoidance.y = vector_avoidance.x*sin(pose.a) + vector_avoidance.y*cos(pose.a); 	
+  speedX= cos(tmp_orientation)+speed_avoidance.x;
+  speedY= sin(tmp_orientation)+speed_avoidance.y; 
+  robot->pos->SetSpeed(speedX,speedY,0 );
+  //printf("robot orientation %.2f goal orientation %.2f robotX %.2f, robotY %.2f, tmp_orientation %.2f,  SpeedX: %.2f, SpeedY: %.2f\n", pose.a, robot->goal_orientation, pose.x, pose.y,tmp_orientation,speedX, speedY);	
+  printf("Coef: %.3f Vector[%.3f %.3f] Speed_avoidance [%.3f %.3f] Speed [%.2f %.2f] \n",coef_avoidance,vector_avoidance.x, vector_avoidance.y,speed_avoidance.x, speed_avoidance.y, speedX,speedY);
+  }
+  stepcount++*/;
+  
+  distance_traveled=Norm_vector(pose.x-scan.past_pose.x, pose.y-scan.past_pose.y);
+  printf("Go straight until %.1f m. Distance travelled: %.2f m\n",robot->goal_distance, distance_traveled);
+  
+  if ( distance_traveled>= Absolute(robot->goal_distance) )
+  {
+    scan_finished=false;
+    init=true;
+    robot->pos->SetSpeed( 0,0,0 );
+  }
   }
   
   /*
@@ -291,7 +302,7 @@ else
   if( verbose ) puts( "Cruise" );
   
   robot->avoidcount = 0;
-  robot->pos->SetXSpeed( cruisespeed );	  
+  robot->pos->SetXSpeed( cruisespeed );	 
   robot->pos->SetTurnSpeed(  0 );
 }
 
@@ -305,15 +316,161 @@ else
   return 0; // run again
 }
 
+bool FollowWall(scan_t* scan, robot_t* robot, Pose pose, double distance )
+{
+  double angle_offset=PI/4,diff_orientation, threshold_dist=2*dist_safe, diff_dist, threshold_change_curvature=0.2;
+  static double curvature=0, perpendicular_orientation=99;
+  static bool follow_init=true,follow_start=false;
+  double rot_speed=0, lin_speed=maximal_wheel_speed;
+  
+  static vector_t data[2], parameters; 
+  int data_length=2; 
+  static int current_new_data=0,jj=0;
+  double tX,tY;
+  
+  if(follow_init==true)
+  {
+    if(Absolute(perpendicular_orientation-99)<0.001)//if perpendicular_orientation == 99, the perpendicular is the min of the scan
+    {
+      diff_orientation=normalize(pose.a-scan->orientation[(int)scan->min[0]]-angle_offset);
+      printf("Perpendicular is min : %.2f \n",scan->orientation[(int)scan->min[0]]);
+    }
+    else
+    {
+      diff_orientation=normalize(pose.a-perpendicular_orientation-angle_offset);
+      printf("Perpendicular is %.2f\n", perpendicular_orientation);
+    }
+      if(Absolute(diff_orientation) > 0.01)
+    {
+      //printf("\nRotate to the start angle %.3f ", diff_orientation);
+      Motor_control(robot, 0, -diff_orientation*10, 0); //P controller
+    }
+    else
+    {
+      follow_init=false;
+      follow_start=true;
+    }
+  }
+  else if(follow_start==true)
+  {
+    diff_dist=distance-threshold_dist;
+    if(diff_dist>3*threshold_change_curvature)//corner
+    {
+      curvature=-0.5;
+      rot_speed=-1;
+      lin_speed=maximal_wheel_speed/4;
+      printf("Outside Corner\n");
+      current_new_data=0;//reset the counter
+    }
+    else if(diff_dist<-threshold_change_curvature)
+    {
+      if(diff_dist<-2*threshold_change_curvature)
+      {
+	rot_speed=0.5;
+	lin_speed=distance*1;
+	curvature= -3*PI/2+angle_offset; //go back
+	printf("Inside Corner\n");
+      }
+      else
+      {
+	curvature=0.3;
+	printf("Start a curve\n");
+      }
+      current_new_data=0;//reset the counter
+    }
+    else // do the curve and estimate the position of the wall
+    {
+      curvature-=0.02;
+      printf("Do the curve\n");
+     
+      
+      if(jj++==5)// estimate the position of the wall
+      {
+	jj=0;
+	data[current_new_data].x = distance*cos(pose.a); //store the current data
+	data[current_new_data].y = distance*sin(pose.a);
+	data[current_new_data].pose.x=pose.x;
+	data[current_new_data].pose.y=pose.y;
+	current_new_data++;
+	if(current_new_data>data_length-1)
+	{
+	  for(int i=0;i<current_new_data-1;i++) //adapt the data in the current frame of the robot
+	  {
+	    tX=pose.x-data[i].pose.x; //translation in the global frame,centered on the robot
+	    tY=pose.y-data[i].pose.y;
+	    printf("tx %.2f\tty %.2f\n",tX,tY);
+	    printf("1 Data%d, x %.2f\ty %.2f\tpose [%.2f, %.2f] \n",i, data[i].x,data[i].y,data[i].pose.x,data[i].pose.y);
+	    data[i].y= -tY+data[i].y;
+	    data[i].x= -tX+data[i].x;
+	    data[i].pose.x=pose.x;
+	    data[i].pose.y=pose.y;
+	    printf("2 Data%d, x %.2f\ty %.2f\tpose [%.2f, %.2f] \n",i, data[i].x,data[i].y,data[i].pose.x,data[i].pose.y);
+	  }
+	  
+	  LeastSquares(data,data_length,&parameters);//estimate the parameters
+	  printf("Parameters : %.2f \t %.2f", parameters.x,parameters.y );
+	  
+	  perpendicular_orientation=atan(-1/parameters.x); // compute the perpendicular direction to the wall
+	  if(normalize(perpendicular_orientation-pose.a)>PI/2) //the perpendicular direction cannot be outside of [-PI/2, PI/2] relatively to the robot
+	  {
+	    perpendicular_orientation=normalize(perpendicular_orientation-PI);
+	  }
+	  else if(normalize(perpendicular_orientation-pose.a)<-PI/2)
+	  {
+	    perpendicular_orientation=normalize(perpendicular_orientation+PI);
+	  }
+	  printf("Least Squares, perpendicular : %.2f\n",perpendicular_orientation);
+	  
+	  if( Absolute(normalize(pose.a-(perpendicular_orientation+angle_offset))) > 0.1 ) // correct the bearing of the robot if the robot has not the correct offset 
+	  {
+	    follow_init=true;
+	    follow_start=false;
+	    printf("Offset has to be corrected\n");
+	  }
+	  else
+	  {
+	    perpendicular_orientation=99;
+	  }
+	  current_new_data=0;//reset the counter
+	}
+      }
+    }
+    robot->goal_orientation=pose.a+PI/2-angle_offset+curvature;
+    printf("Follow wall goal orientation %.2f\n\n",robot->goal_orientation);
+    Motor_control(robot, lin_speed,rot_speed,pose.a);
+  }
+  else
+    printf("Error Follow_wall\n");
+  return 0;
+}
+
+bool LeastSquares( vector_t data[], int data_length, vector_t* parameters)
+{
+  // least squares with y=a*x+b, with are looking for a and b which will be stored in parameters ; x and y are known and store in data
+ 
+   printf("LS: Data0x %.2f\tData0y %.2f\tData1x %.2f\tData1y %.2f\t", data[0].x, data[0].y,data[1].x, data[1].y );
+  parameters->x = (data[1].y-data[0].y)/(data[1].x-data[0].x); // not least squares : a = (y1-y0)/(x1-x0) and b= y1-a*x1
+  parameters->y = data[1].y-parameters->x*data[1].x;
+   printf("Parameters : %.2f \t %.2f\n", parameters->x,parameters->y );
+  
+  return 0;
+}
+
+double PID_controller(double measured_value, double desired_value, double K, double Ti, double Td)
+{
+  
+  return 0;
+}
+
 bool Static_scan(double angle_start, double scan_fov, double rot_speed, scan_t* scan, robot_t* robot, Pose pose, double distance)
 {
   static bool scan_init = true, scan_pending=false, scan_finished = false;
   static int ii;
   double diff_orientation;
   
-   if (scan_init==true)
+  if (scan_init==true)
   {
-     scan_finished=false;
+    scan_finished=false;
     diff_orientation=normalize(pose.a-angle_start);
     if( Absolute(diff_orientation) >0.01) // go to angle_start
     {
@@ -365,9 +522,9 @@ bool Static_scan(double angle_start, double scan_fov, double rot_speed, scan_t* 
 	scan->max[0]=ii;
       }
       
-//       rotation_angle+=Absolute(normalize(pose.a-normalize(rotation_angle+scan->orientation_start)));
+      //       rotation_angle+=Absolute(normalize(pose.a-normalize(rotation_angle+scan->orientation_start)));
       printf("%.2f, %.2f\n",pose.a, distance);
-//       printf("\rScanning[%d%]",(ii*100)/410);
+      //       printf("\rScanning[%d%]",(ii*100)/410);
       ii++;
     }
     else// one turn --> stop
@@ -376,15 +533,16 @@ bool Static_scan(double angle_start, double scan_fov, double rot_speed, scan_t* 
       scan->length=ii-1;
       scan_pending=false;// finish rotation
       scan_finished=true;
-
+      
       switch(scan_analyse)
       {
 	case 0 : robot->goal_orientation=scan->orientation[(int)(scan->max[0])];break; // FirstMax go farthest
 	case 1 : FixedMovingWindow(scan,robot);break;// FixedMovingWindow
 	case 2 : FocusOnMax(scan,robot);break;
+	case 3 : FollowWall_activated=true;break;
 	default : printf("\nWrong scan analyse !\n");break;
       }
-      printf("\nEnd scan: #measurements %d, global goal: [%.2f %.2f], orientation robot: %.2f\n",scan->length,robot->goal_orientation,robot->goal_distance, pose.a);		
+      //printf("\nEnd scan: #measurements %d, global goal: [%.2f %.2f], orientation robot: %.2f\n",scan->length,robot->goal_orientation,robot->goal_distance, pose.a);		
     }
   }
   else
@@ -564,9 +722,9 @@ void FixedMovingWindow( scan_t* scan, robot_t* robot)
 int PositionUpdate( Model* mod, robot_t* robot )
 {
   Pose pose = robot->pos->GetPose();
-
+  
   printf( "Pose: [%.2f %.2f %.2f %.2f]\n",pose.x, pose.y, pose.z, pose.a );
-
+  
   return 0; // run again
 }
 
@@ -609,7 +767,7 @@ int Motor_control(robot_t* robot, double speed, double rot_speed, double orienta
     max=Absolute(v3);
   if(v4>max)
     max=Absolute(v4);
-   
+  
   if (max > maximal_wheel_speed)
   {
     factor = maximal_wheel_speed/max;

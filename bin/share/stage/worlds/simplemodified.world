@@ -4,7 +4,7 @@
 
 include "pioneermodified.inc"
 include "map.inc"
-include "sickmodified.inc"
+#include "sickmodified.inc"
 
 # time to pause (in GUI mode) or quit (in headless mode (-g)) the simulation
 quit_time 3600 # 1 hour of simulated time
@@ -19,7 +19,7 @@ interval_sim 10
 window
 (
   size [ 1800 600 ] # in pixels
-  scale 60   # pixels per meter
+  scale 70   # pixels per meter
   center [ -0.040  -0.274 ]
   rotate [ 0  0 ]
   			
@@ -30,7 +30,7 @@ window
 floorplan
 ( 
   bitmap "bitmaps/mapTASC18000.png"
-	size [133 30 0.600]
+	size [133 30 0.5]
 )
 
 
@@ -38,7 +38,7 @@ pioneer2dx
 (		  
   # can refer to the robot by this name
   name "r0"
-  pose [ -18.42 -6.48 0 1 ] 
+  pose [ 0 0 0 1 ] 
 
   # pioneer2dx's sonars	will be ranger:0 and the laser will be ranger:1
   #sicklaser( pose [ 0 0 0 0 ] ) 
@@ -51,6 +51,10 @@ pioneer2dx
 
   # report error-free position in world coordinates
   localization "gps"
+  # report position with drift in world coordinates
+  #localization "odom"
+  #odom_error [0.001 0.001 0.001 0.001]
+  
   localization_origin [ 0 0 0 0 ]
 )
 

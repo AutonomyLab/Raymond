@@ -18,7 +18,7 @@ interval_sim 10
 # configure the GUI window
 window
 (
-  size [ 1800 600 ] # in pixels
+  size [ 1280 720 ] # in pixels
   scale 70   # pixels per meter
   center [ -0.040  -0.274 ]
   rotate [ 0  0 ]
@@ -37,7 +37,7 @@ floorplan
 pioneer2dx
 (		  
   # can refer to the robot by this name
-  name "r0"
+  name "Robot"
   pose [ 0 0 0 1 ] 
 
   # pioneer2dx's sonars	will be ranger:0 and the laser will be ranger:1

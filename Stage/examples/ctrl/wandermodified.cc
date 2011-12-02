@@ -21,7 +21,7 @@ const double odometry_precision = 0.001;//[m] and [radian]
 const double sensor_max_range = 10; //max range of the sensor [m]
 const double sensor_min_range = 0.2; //min range of the sensor [m]
 const double sensor_precision = 0.005;
-const bool with_noise = false; // for the laser and the position
+const bool with_noise = true; // for the laser and the position
 
 const double cruisespeed = 0.4; 
 const double avoidturn = 0.1;
@@ -318,29 +318,21 @@ else
 
 bool FollowWall(scan_t* scan, robot_t* robot, Pose pose, double distance )
 {
-  double angle_offset=PI/4,diff_orientation, threshold_dist=2*dist_safe, diff_dist, threshold_change_curvature=0.2;
-  static double curvature=0, perpendicular_orientation=99;
-  static bool follow_init=true,follow_start=false;
+  double angle_offset=PI/4,diff_orientation, threshold_dist=1.5*dist_safe, diff_dist, threshold_change_curvature=0.2;
+  static double curvature=0, perpendicular_orientation=scan->orientation[(int)scan->min[0]]; //the perpendicular is the min of the scan
+  static bool follow_init=true,follow_start=false, first_outside_corner=true;
   double rot_speed=0, lin_speed=maximal_wheel_speed;
   
   static vector_t data[2], parameters; 
   int data_length=2; 
-  static int current_new_data=0,jj=0;
+  static int current_new_data=0,jj=0, start_curve=0;;
   double tX,tY;
   
   if(follow_init==true)
   {
-    if(Absolute(perpendicular_orientation-99)<0.001)//if perpendicular_orientation == 99, the perpendicular is the min of the scan
-    {
-      diff_orientation=normalize(pose.a-scan->orientation[(int)scan->min[0]]-angle_offset);
-      printf("Perpendicular is min : %.2f \n",scan->orientation[(int)scan->min[0]]);
-    }
-    else
-    {
-      diff_orientation=normalize(pose.a-perpendicular_orientation-angle_offset);
-      printf("Perpendicular is %.2f\n", perpendicular_orientation);
-    }
-      if(Absolute(diff_orientation) > 0.01)
+    diff_orientation=normalize(pose.a-perpendicular_orientation-angle_offset);
+    printf("Perpendicular is %.2f\n", perpendicular_orientation);
+    if(Absolute(diff_orientation) > 0.03)
     {
       //printf("\nRotate to the start angle %.3f ", diff_orientation);
       Motor_control(robot, 0, -diff_orientation*10, 0); //P controller
@@ -354,27 +346,47 @@ bool FollowWall(scan_t* scan, robot_t* robot, Pose pose, double distance )
   else if(follow_start==true)
   {
     diff_dist=distance-threshold_dist;
-    if(diff_dist>3*threshold_change_curvature)//corner
+    if(diff_dist>3*threshold_change_curvature)//outside corner
     {
-      curvature=-0.5;
-      rot_speed=-1;
-      lin_speed=maximal_wheel_speed/4;
-      printf("Outside Corner\n");
+      if(first_outside_corner==true)
+      {
+	first_outside_corner=false;
+	curvature=0.3;
+	printf("Outside Corner first time\n");
+      }
+      else
+      {
+	//curvature-=0.00;
+	rot_speed=-3;
+	lin_speed=maximal_wheel_speed*2/3;
+	printf("Outside Corner\n");
+      }
       current_new_data=0;//reset the counter
     }
     else if(diff_dist<-threshold_change_curvature)
     {
-      if(diff_dist<-2*threshold_change_curvature)
+      if(diff_dist<-1.5*threshold_change_curvature)//inside corner
       {
-	rot_speed=0.5;
-	lin_speed=distance*1;
+	rot_speed=1;
+	lin_speed=distance*1/2;
 	curvature= -3*PI/2+angle_offset; //go back
 	printf("Inside Corner\n");
+	start_curve=0;
       }
       else
       {
-	curvature=0.3;
-	printf("Start a curve\n");
+	if(start_curve>7)//last step was already the start of the curve
+	{
+	  rot_speed=1;
+	  lin_speed=distance*1/2;
+	}
+	else
+	{
+	  curvature=0.6;
+	  printf("Start a curve\n");
+	  start_curve++;
+	}
+	first_outside_corner=true;//reset
       }
       current_new_data=0;//reset the counter
     }
@@ -382,9 +394,9 @@ bool FollowWall(scan_t* scan, robot_t* robot, Pose pose, double distance )
     {
       curvature-=0.02;
       printf("Do the curve\n");
-     
+      start_curve=0;
       
-      if(jj++==5)// estimate the position of the wall
+      if(jj++==10)// estimate the position of the wall
       {
 	jj=0;
 	data[current_new_data].x = distance*cos(pose.a); //store the current data
@@ -421,20 +433,17 @@ bool FollowWall(scan_t* scan, robot_t* robot, Pose pose, double distance )
 	  }
 	  printf("Least Squares, perpendicular : %.2f\n",perpendicular_orientation);
 	  
-	  if( Absolute(normalize(pose.a-(perpendicular_orientation+angle_offset))) > 0.1 ) // correct the bearing of the robot if the robot has not the correct offset 
+	  if( Absolute(normalize(pose.a-(perpendicular_orientation+angle_offset))) > 0.15 ) // correct the bearing of the robot if the robot has not the correct offset 
 	  {
 	    follow_init=true;
 	    follow_start=false;
 	    printf("Offset has to be corrected\n");
 	  }
-	  else
-	  {
-	    perpendicular_orientation=99;
-	  }
 	  current_new_data=0;//reset the counter
 	}
       }
     }
+   // robot->goal_orientation=perpendicular_orientation+PI/2+curvature;
     robot->goal_orientation=pose.a+PI/2-angle_offset+curvature;
     printf("Follow wall goal orientation %.2f\n\n",robot->goal_orientation);
     Motor_control(robot, lin_speed,rot_speed,pose.a);

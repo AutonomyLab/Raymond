@@ -1,7 +1,0 @@
-set line /dev/ttyUSB1
-
-set flow-control none
-
-set carrier-watch off
-
-set speed 115200

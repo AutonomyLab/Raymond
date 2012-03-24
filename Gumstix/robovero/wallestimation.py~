@@ -1,0 +1,30 @@
+from algorithm import WallEstimation
+import numpy as np
+from math import pi, degrees, sin, cos
+import matplotlib.pyplot as plt
+
+length =30
+heading = 0.0
+distance = [1.0 for n in range(length)]
+pose_x = [0.0 for n in range(length)]
+pose_y = [n*0.5 for n in range(length)]
+
+wall_x= np.zeros(length)
+wall_y= np.zeros(length)
+
+print heading ,distance, pose_x, pose_y
+for n in range(length):
+	wall_x[n] = pose_x[n]+ distance[n]*cos(heading)
+	wall_y[n] = pose_y[n] + distance[n]*sin(heading)
+	perpendicular_orientation = WallEstimation(distance[n], heading, pose_x[n], pose_y[n])
+print 'Perp. final',degrees(perpendicular_orientation)
+
+a = int(raw_input('Param_a'))
+b = int(raw_input('Param_b'))
+
+# Plot the data along with the fitted line:
+plt.figure()
+plt.plot(wall_x,wall_y, 'o', label='Original data', markersize=10)
+plt.plot(wall_x, a*x + b, 'r', label='Fitted line')
+plt.legend()
+plt.show()

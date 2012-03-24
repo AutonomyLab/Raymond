@@ -2,7 +2,7 @@ ARDUINO:
 The code  for Arduino is in the folder Arduino. You then need to copy these files in the right directory, more details in the wiki
 
 GUMSTIX:
-This directory contains files used in the wiki.
+This directory contains files used in the wiki and, the C-code(firmware) for Robovero and the Python scripts for Overo.
 
 STAGE:
 The files for Stage are in the directories Stage and bin. The directory Stage contains the controller and the drectory bin contains the world file and the robot and sensor files.

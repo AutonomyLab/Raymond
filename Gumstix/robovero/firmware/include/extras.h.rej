@@ -1,0 +1,23 @@
+*** include/extras.h	2012-01-02 18:54:56.000000000 -0600
+--- include/extras.h	2012-01-02 18:56:33.000000000 -0600
+***************
+*** 53,58 ****
+  int _deref(uint8_t * args);
+  int _roboveroConfig(uint8_t * args);
+  int _resetConfig(uint8_t * args);
+  
+  #endif
+  
+--- 53,64 ----
+  int _deref(uint8_t * args);
+  int _roboveroConfig(uint8_t * args);
+  int _resetConfig(uint8_t * args);
++ int _configAccel(uint8_t * args);
++ int _readAccel(uint8_t * args);
++ int _configMag(uint8_t * args);
++ int _readMag(uint8_t * args);
++ int _configGyro(uint8_t * args);
++ int _readGyro(uint8_t * args);
+  
+  #endif
+  
